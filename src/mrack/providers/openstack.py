@@ -17,19 +17,20 @@
 import asyncio
 import logging
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 
 from asyncopenstackclient import AuthPassword, GlanceClient
 from simple_rest_client.exceptions import NotFoundError
 
-from mrack.errors import ProvisioningError, ServerNotFoundError, ValidationError
+from mrack.errors import ServerNotFoundError, ValidationError
 from mrack.host import (
     STATUS_ACTIVE,
     STATUS_DELETED,
     STATUS_ERROR,
     STATUS_OTHER,
     STATUS_PROVISIONING,
+    Host,
 )
 from mrack.providers.provider import Provider
 from mrack.providers.utils.osapi import ExtraNovaClient, NeutronClient
@@ -54,6 +55,7 @@ class OpenStackProvider(Provider):
 
     def __init__(self):
         """Object initialization."""
+        super().__init__()
         self._name = PROVISIONER_KEY
         self.flavors = {}
         self.flavors_by_ref = {}
@@ -64,9 +66,8 @@ class OpenStackProvider(Provider):
         self.networks_by_ref = {}
         self.ips = {}
         self.ips_by_ref = {}
-        self.timeout = 60  # minutes
-        self.poll_sleep_initial = 15  # seconds
-        self.poll_sleep = 7  # seconds
+        self.poll_sleep_initial_base = 15  # seconds
+        self.poll_sleep_base = 7  # seconds
         self.STATUS_MAP = {
             "ACTIVE": STATUS_ACTIVE,
             "BUILD": STATUS_PROVISIONING,
@@ -76,7 +77,7 @@ class OpenStackProvider(Provider):
             # https://docs.openstack.org/api-guide/compute/server_concepts.html
         }
 
-    async def init(self, image_names=None, host_cnt=0):
+    async def init(self, image_names=None):
         """Initialize provider with data from OpenStack.
 
         Load:
@@ -87,10 +88,8 @@ class OpenStackProvider(Provider):
         * account limits (max and current usage of vCPUs, memory, ...)
         """
         # session expects that credentials will be set via env variables
-        if host_cnt == 0:
-            raise ProvisioningError("Provider initialized with  0 required host count")
         logger.info("Initializing OpenStack provider")
-        self.poll_sleep_initial, self.poll_sleep = self.get_poll_sleep_times(host_cnt)
+
         self.session = AuthPassword()
         self.nova = ExtraNovaClient(session=self.session)
         self.glance = GlanceClient(session=self.session)
@@ -371,104 +370,59 @@ class OpenStackProvider(Provider):
             logger.warning(f"Server '{uuid}' not found, probably already deleted")
             pass
 
-    async def wait_till_provisioned(
-        self, instance, timeout=None, poll_sleep=None, poll_sleep_initial=None
-    ):
+    async def is_provisioned(self, resource):
         """
-        Wait till server is provisioned.
+        Check if create_server resource is already provisioned.
 
-        Provisioned means that server is in ACTIVE or ERROR state
-
-        State is checked by polling. Polling can be controller via `poll_sleep` and
-        `poll_sleep_initial` options. This is useful when provisioning a lot of
-        machines as it is better to increase initial poll to not ask to often as
-        provisioning resources takes some time.
-
-        Waits till timeout happens. Timeout can be either specified or default provider
-        timeout is used.
-
-        Return information about provisioned server.
+        Provisioned means that server is in ACTIVE or ERROR state.
         """
-        uuid = instance.get("id")
-        if not poll_sleep_initial:
-            poll_sleep_initial = self.poll_sleep_initial
-        if not poll_sleep:
-            poll_sleep = self.poll_sleep
-        if not timeout:
-            timeout = self.timeout
-
-        start = datetime.now()
-        timeout_time = start + timedelta(minutes=timeout)
+        uuid = resource.get("id")
         done_states = ["ACTIVE", "ERROR"]
+        try:
+            resp = await self.nova.servers.get(uuid)
+        except NotFoundError:
+            raise ServerNotFoundError(uuid)
+        server = resp["server"]
+        if server["status"] in done_states:
+            return server
+        return False
 
-        # do not check the state immediately, it will take some time
-        await asyncio.sleep(poll_sleep_initial)
-
-        while datetime.now() < timeout_time:
-            try:
-                resp = await self.nova.servers.get(uuid)
-            except NotFoundError:
-                raise ServerNotFoundError(uuid)
-            server = resp["server"]
-            if server["status"] in done_states:
-                break
-
-            await asyncio.sleep(poll_sleep)
-
-        done_time = datetime.now()
-        prov_duration = (done_time - start).total_seconds()
-
-        if datetime.now() >= timeout_time:
-            logger.warning(
-                f"{uuid} was not provisioned within a timeout of" f" {timeout} mins"
-            )
-        else:
-            logger.info(f"{uuid} was provisioned in {prov_duration:.1f}s")
-
-        return server
-
-    def get_poll_sleep_times(self, host_count):
+    def reconfigure(self, reqs):
         """Compute polling sleep times based on number of hosts.
 
         So that we don't create unnecessary load on server while checking state of
         provisioning.
-
-        returns (initial_sleep, sleep)
         """
-        init_poll = self.poll_sleep_initial
-        poll = self.poll_sleep
+        host_count = len(reqs)
 
         # initial poll is the biggest performance saver it should be around
         # time when more than half of host is in ACTIVE state
-        init_poll = init_poll + 0.65 * host_count
+        self.poll_sleep_initial = self.poll_sleep_initial_base + 0.65 * host_count
 
         # poll time should ask often enough, to not create unnecessary delays
         # while not that many to not load the server much
-        poll = poll + 0.22 * host_count
-
-        return init_poll, poll
+        self.poll_sleep = self.poll_sleep_base + 0.22 * host_count
 
     async def delete_host(self, host):
         """Issue deletion of host(server) from OpenStack."""
         logger.info(f"Deleting OpenStack host {host.id}")
-        await self.delete_server(host._id)
+        await self.delete_server(host.id)
         return True
 
-    def _get_host_info_from_prov_result(self, prov_result):
-        """Get needed host infromation from openstack provisioning result."""
-        result = {
-            "id": None,
-            "name": None,
-            "addresses": None,
-            "status": None,
-            "fault": None,
-        }
+    def to_host(self, req, prov_result):
+        """Get host from openstack provisioning result."""
 
-        result["id"] = prov_result.get("id")
-        result["name"] = prov_result.get("name")
         networks = prov_result.get("addresses", {})
-        result["addresses"] = [ip.get("addr") for n in networks.values() for ip in n]
-        result["fault"] = prov_result.get("fault")
-        result["status"] = self.STATUS_MAP.get(prov_result.get("status"), STATUS_OTHER)
+        ips = [ip.get("addr") for n in networks.values() for ip in n]
 
-        return result
+        host = Host(
+            self,
+            prov_result.get("id"),
+            prov_result.get("name"),
+            ips,
+            self.STATUS_MAP.get(prov_result.get("status"), STATUS_OTHER),
+            prov_result,
+            username=None,
+            error_obj=prov_result.get("fault"),
+        )
+        return host

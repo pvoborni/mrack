@@ -33,21 +33,13 @@ class OpenStackTransformer(Transformer):
     async def init_provider(self):
         """Initialize associate provider."""
         images = self.config["images"].values()
-        cnt = self._get_metadata_host_cnt()
-        await self._provider.init(image_names=images, host_cnt=cnt)
+        await self._provider.init(image_names=images)
 
     def _get_flavor(self, host):
         """Get flavor by host group."""
         # TODO: add sizes
 
         return get_config_value(self.config["flavors"], host["group"])
-
-    def _get_metadata_host_cnt(self):
-        """Get all host count."""
-        res = 0
-        for domain in self._metadata.get("domains"):
-            res += len(domain.get("hosts"))  # will get all even from other provider
-        return res
 
     def _is_network_type(self, name):
         """Check if name is a configured network type in provisioning config."""

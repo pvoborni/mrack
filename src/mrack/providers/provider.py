@@ -15,10 +15,12 @@
 """General Provider interface."""
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from mrack.errors import ProvisioningError, ValidationError
-from mrack.host import STATUS_OTHER, Host
+from mrack.host import STATUS_OTHER
+
+logger = logging.getLogger(__name__)
 
 
 class Provider:
@@ -28,6 +30,9 @@ class Provider:
         """Initialize provider."""
         self._name = "dummy"
         self.STATUS_MAP = {"OTHER": STATUS_OTHER}
+        self.poll_sleep_initial = 0
+        self.poll_sleep = 1
+        self.timeout = 60  # minutes
         return
 
     @property
@@ -40,16 +45,70 @@ class Provider:
         raise NotImplementedError()
 
     async def can_provision(self, hosts):
-        """Check that provider has enough resources to provison hosts."""
+        """Check that provider has enough resources to provision hosts."""
         raise NotImplementedError()
 
     async def create_server(self, req):
         """Request and create resource on selected provider."""
         raise NotImplementedError()
 
-    async def wait_till_provisioned(self, resource):
-        """Wait till resource is provisioned."""
+    async def is_provisioned(self, resource):
+        """
+        Check if create_server resource is already provisioned.
+
+        Returns False if not, otherwise returns object for to_host method.
+        """
         raise NotImplementedError()
+
+    def req_hostame(self, req):
+        """Get hostname part from provisioning requirement object."""
+        return req.get('name') or req.get('hostname')
+
+    def reconfigure(self, reqs):
+        """Reconfigure itself based on hosts to be provisioned."""
+        return
+
+    async def wait_till_provisioned(self, req, resource):
+        """
+        Wait till server is provisioned.
+
+        Provisioned means that server is in ACTIVE or ERROR state
+
+        State is checked by polling. Polling can be controller via `poll_sleep` and
+        `poll_sleep_initial` options. This is useful when provisioning a lot of
+        machines as it is better to increase initial poll to not ask to often as
+        provisioning resources takes some time.
+
+        Waits till timeout happens. Timeout can be either specified or default provider
+        timeout is used.
+
+        Return information about provisioned server.
+        """
+        start = datetime.now()
+        timeout_time = start + timedelta(minutes=self.timeout)
+
+        # do not check the state immediately, it will take some time
+        await asyncio.sleep(self.poll_sleep_initial)
+
+        while datetime.now() < timeout_time:
+            result = await self.is_provisioned(resource)
+            if result:
+                break
+            await asyncio.sleep(self.poll_sleep)
+
+        done_time = datetime.now()
+        prov_duration = (done_time - start).total_seconds()
+
+        hostname = self.req_hostame(req)
+        if datetime.now() >= self.timeout:
+            logger.warning(
+                f"{hostname} was not provisioned within a timeout of"
+                f" {self.timeout} mins"
+            )
+        else:
+            logger.info(f"{hostname} was provisioned in {prov_duration:.1f}s")
+
+        return result
 
     async def provision_hosts(self, hosts, logger=None):
         """Provision hosts based on list of host requirements.
@@ -78,6 +137,8 @@ class Provider:
             raise ValidationError("Not enough resources to provision")
         logger.info("Resource availability: OK")
 
+        self.reconfigure(hosts)
+
         started = datetime.now()
 
         count = len(hosts)
@@ -91,8 +152,8 @@ class Provider:
 
         logger.info("Waiting for all hosts to be available")
         wait_servers = []
-        for create_resp in create_resps:
-            awaitable = self.wait_till_provisioned(create_resp)
+        for req, create_resp in zip(hosts, create_resps):
+            awaitable = self.wait_till_provisioned(req, create_resp)
             wait_servers.append(awaitable)
 
         server_results = await asyncio.gather(*wait_servers)
@@ -102,16 +163,17 @@ class Provider:
         logger.info("All hosts reached provisioning final state (ACTIVE or ERROR)")
         logger.info(f"Provisioning duration: {provi_duration}")
 
-        errors = [res for res in server_results if res["status"] == "ERROR"]
-        if errors:
-            logger.info("Some host did not start properly")
-            for err in errors:
-                self.print_basic_info(err)
-            logger.info("Given the error, will delete all hosts")
-            await self.delete_hosts(server_results, logger)
-            raise ProvisioningError(errors)
+        hosts = [self.to_host(req, srv) for req, srv in zip(hosts, server_results)]
 
-        hosts = [self.to_host(srv) for srv in server_results]
+        err_hosts = [host for host in hosts if host.error_obj]
+        if err_hosts:
+            logger.info("Some host did not start properly")
+            for host in err_hosts:
+                print(str(host))
+            logger.info("Given the error, will delete all hosts")
+            await self.delete_hosts(hosts, logger)
+            raise ProvisioningError(err_hosts)
+
         for host in hosts:
             logger.info(host)
         return hosts
@@ -131,22 +193,6 @@ class Provider:
         logger.info("All servers issued to be deleted")
         return results
 
-    def _get_host_info_from_prov_result(self, prov_result):
-        """Get needed host infromation from AWS provisioning result."""
-        raise NotImplementedError()
-
-    def to_host(self, provisioning_result, username=None):
+    def to_host(self, req, provisioning_result):
         """Transform provisioning result into Host object."""
-        host_info = self._get_host_info_from_prov_result(provisioning_result)
-
-        host = Host(
-            self,
-            host_info.get("id"),
-            host_info.get("name"),
-            host_info.get("addresses"),
-            self.STATUS_MAP.get(host_info.get("status"), STATUS_OTHER),
-            provisioning_result,
-            username=username,
-            error_obj=host_info.get("fault"),
-        )
-        return host
+        raise NotImplementedError()
