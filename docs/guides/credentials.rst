@@ -64,3 +64,38 @@ More info about Beaker client configuration is available `here <https://beaker-p
 
     You will need to set the URL of your Beaker server without trailing slash and then configure how your Beaker client authenticates with the Beaker server.
     You can use either password authentication or Kerberos authentication.
+
+Virt
+----
+
+Virt provider requires testcloud library prepared and installed. If mrack is
+installed via rpms then installation of the testcloud images is done automatically.
+
+If mrack is installed via pip then:
+
+.. code:: bash
+
+    $ sudo dnf install testcloud
+
+User needs to be part of a testcloud group for successful provisioning.
+
+.. code:: bash
+
+    $ sudo usermod -a -G testcloud $USER
+
+Provisioning config enablement:
+
+.. code:: yaml
+
+    virt:
+    images:
+        fedora-32: https://download.fedoraproject.org/pub/fedora/linux/releases/32/Cloud/x86_64/images/Fedora-Cloud-Base-32-1.6.x86_64.qcow2
+        fedora-33: https://download.fedoraproject.org/pub/fedora/linux/releases/33/Cloud/x86_64/images/Fedora-Cloud-Base-33-1.2.x86_64.qcow2
+    options: # defaults for undefined groups
+        ram: 1024 # in MiB
+        disksize: 10 # in GiB
+    groups: # per-group overrides, similar to flavors
+        ipaserver:
+            ram: 2560
+        ad:
+            ram: 3072

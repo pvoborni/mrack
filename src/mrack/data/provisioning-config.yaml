@@ -30,6 +30,21 @@ podman:
         # Adding ipv6 support to network
         "--network": "enable_ipv6=true"
 
+virt:
+    images:
+        # yamllint disable-line rule:line-length
+        fedora-32: https://kojipkgs.fedoraproject.org/compose/cloud/Fedora-Cloud-32-20210422.0/compose/Cloud/x86_64/images/Fedora-Cloud-Base-32-20210422.0.x86_64.qcow2
+        # yamllint disable-line rule:line-length
+        fedora-33: https://kojipkgs.fedoraproject.org/compose/cloud/Fedora-Cloud-33-20210421.0/compose/Cloud/x86_64/images/Fedora-Cloud-Base-33-20210421.0.x86_64.qcow2
+    options:  # default for undefined groups
+        ram: 1024  # in MiB
+        disksize: 10  # in GiB
+    groups:  # per-group overrides, similar to flavors in openstack
+        ipaserver:
+            ram: 2560
+        ad:
+            ram: 3072
+
 aws:  # aws provider config
     images:
         # list of ami images key is used in metadata ami image is used for provider e.g.

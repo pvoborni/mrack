@@ -23,7 +23,7 @@ steps:
 
   - script: |
       sudo apt-get update -y
-      sudo apt-get install libkrb5-dev -y
+      sudo apt-get install libvirt-dev libkrb5-dev -y
     displayName: 'Install distro dependencies'
 
   - script: |

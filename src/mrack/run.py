@@ -48,6 +48,8 @@ from mrack.providers.podman import PROVISIONER_KEY as PODMAN
 from mrack.providers.podman import PodmanProvider
 from mrack.providers.static import PROVISIONER_KEY as STATIC
 from mrack.providers.static import StaticProvider
+from mrack.providers.virt import PROVISIONER_KEY as VIRT
+from mrack.providers.virt import VirtProvider
 from mrack.utils import NoSuchFileHandler, load_yaml
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,7 @@ def init_providers():
     providers.register(BEAKER, BeakerProvider)
     providers.register(PODMAN, PodmanProvider)
     providers.register(STATIC, StaticProvider)
+    providers.register(VIRT, VirtProvider)
 
 
 def init_db(path):

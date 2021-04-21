@@ -29,6 +29,8 @@ from mrack.transformers.podman import CONFIG_KEY as PODMAN_KEY
 from mrack.transformers.podman import PodmanTransformer
 from mrack.transformers.static import CONFIG_KEY as STATIC_KEY
 from mrack.transformers.static import StaticTransformer
+from mrack.transformers.virt import CONFIG_KEY as VIRT_KEY
+from mrack.transformers.virt import VirtTransformer
 
 
 class Registry:
@@ -69,3 +71,4 @@ transformers.register(AWS_KEY, AWSTransformer)
 transformers.register(BEAKER_KEY, BeakerTransformer)
 transformers.register(PODMAN_KEY, PodmanTransformer)
 transformers.register(STATIC_KEY, StaticTransformer)
+transformers.register(VIRT_KEY, VirtTransformer)
