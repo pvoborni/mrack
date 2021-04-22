@@ -215,6 +215,11 @@ def ssh_to_host(
     command=None,
 ):
     """SSH to the selected host."""
+    meta_host, _domain = get_host_from_metadata(global_context["metadata"], host.name)
+    username = username or get_username(host, meta_host, global_context["config"])
+    ssh_key = ssh_key or get_ssh_key(host, meta_host, global_context["config"])
+    psw = host.password or password
+
     my_env = os.environ.copy()
 
     run_args = {
@@ -226,19 +231,15 @@ def ssh_to_host(
     cmd.extend(["-o", "'StrictHostKeyChecking=no'"])
     cmd.extend(["-o", "'UserKnownHostsFile=/dev/null'"])
 
-    meta_host, _domain = get_host_from_metadata(global_context["metadata"], host.name)
-    username = username or get_username(host, meta_host, global_context["config"])
-    ssh_key = ssh_key or get_ssh_key(host, meta_host, global_context["config"])
+    if psw:
+        cmd.extend(["-o", "'PasswordAuthentication=yes'"])
+        cmd = ["sshpass", "-p", psw] + cmd
+    elif ssh_key:
+        cmd.extend(["-o", "'PasswordAuthentication=no'"])
+        cmd.extend(["-i", ssh_key])
 
     if username:
         cmd.extend(["-l", username])
-    if ssh_key:
-        cmd.extend(["-o", "'PasswordAuthentication=no'"])
-        cmd.extend(["-i", ssh_key])
-    psw_input = None
-    if password and not ssh_key:
-        cmd.extend(["-o", "'PasswordAuthentication'"])
-        psw_input = f"{password}\n"
 
     cmd.append(host.ip_addr)  # Destination
 
@@ -249,7 +250,7 @@ def ssh_to_host(
 
     logger.info(cmd)
     process = subprocess.Popen(cmd, **run_args)
-    process.communicate(input=psw_input)
+    process.communicate()
     return process.returncode == 0
 
 

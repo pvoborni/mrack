@@ -324,6 +324,7 @@ class Provider:
             self.status_map.get(host_info.get("status"), STATUS_OTHER),
             provisioning_result,
             username=username,
+            password=host_info.get("password"),
             error_obj=host_info.get("fault"),
         )
         return host
