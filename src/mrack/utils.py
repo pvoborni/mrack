@@ -15,6 +15,7 @@
 
 """Module with utility and helper functions."""
 
+import asyncio
 import base64
 import contextlib
 import datetime
@@ -27,7 +28,7 @@ from typing import Dict
 
 import yaml
 
-from mrack.errors import ConfigError
+from mrack.errors import ConfigError, ProvisioningError
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +251,28 @@ def ssh_to_host(
     process = subprocess.Popen(cmd, **run_args)
     process.communicate(input=psw_input)
     return process.returncode == 0
+
+
+async def exec_async_subprocess(program, args, raise_on_err=True):
+    """Util method to execute subprocess asynchronously."""
+    process = await asyncio.create_subprocess_exec(
+        program,
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    if stdout:
+        stdout = stdout.decode()
+    if stdout is None:
+        stdout = ""
+    if stderr:
+        stderr = stderr.decode()
+    if stdout is None:
+        stderr = ""
+    if process.returncode != 0 and raise_on_err:
+        raise ProvisioningError(stderr)
+    return stdout, stderr, process
 
 
 class NoSuchFileHandler:

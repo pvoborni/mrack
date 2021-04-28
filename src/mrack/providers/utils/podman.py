@@ -14,12 +14,11 @@
 
 """Module for working with podman."""
 
-import asyncio
 import json
 import logging
 import subprocess
 
-from mrack.errors import ProvisioningError
+from mrack.utils import exec_async_subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +33,7 @@ class Podman:
 
     async def _run_podman(self, args, raise_on_err=True):
         """Util method to execute podman process."""
-        process = await asyncio.create_subprocess_exec(
-            self.program,
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-        if stdout:
-            stdout = stdout.decode()
-        if stdout is None:
-            stdout = ""
-        if stderr:
-            stderr = stderr.decode()
-        if stdout is None:
-            stderr = ""
-        if process.returncode != 0 and raise_on_err:
-            raise ProvisioningError(stderr)
-        return stdout, stderr, process
+        return await exec_async_subprocess(self.program, args, raise_on_err)
 
     async def run(
         self,
