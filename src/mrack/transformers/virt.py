@@ -14,6 +14,8 @@
 
 """Virt transformer module."""
 
+import secrets
+
 from mrack.transformers.transformer import Transformer
 
 CONFIG_KEY = "virt"
@@ -24,6 +26,10 @@ class VirtTransformer(Transformer):
 
     _config_key = CONFIG_KEY
     _required_config_attrs = ["images", "options", "groups"]
+
+    def __init__(self):
+        """Initialize Virt transformer."""
+        self.run_id = secrets.token_urlsafe()[:6]
 
     async def init_provider(self):
         """Initialize associate provider and transformer display name."""
@@ -42,6 +48,7 @@ class VirtTransformer(Transformer):
         """Create single input for podman provisioner."""
         req = {
             "name": host["name"],
+            "run_id": self.run_id,
             "image_url": self._get_image(host["os"]),
         }
         for option in [
